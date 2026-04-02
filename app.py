@@ -149,10 +149,10 @@ import streamlit as st
 def load_data():
     return pd.read_csv("incidents_17952.csv")
 
-
 @st.cache_data
 def load_geo():
-    return gpd.read_file("zones_17952.geojson.txt")
+    with open("zones_17952.geojson") as f:
+        return json.load(f)
 
 
 # =========================
@@ -338,7 +338,7 @@ agg["sla_target"] = SLA_TARGET
 
 fig_map = px.choropleth(
     agg,
-    geojson=zones_gdf.__geo_interface__,
+    geojson=zones_gdf,
     locations="zone",
     featureidkey="properties.zone_name",
     color=metric,
@@ -382,36 +382,44 @@ fig_map.update_geos(fitbounds="locations", visible=False)
 # =========================
 # ADD ZONE LABELS
 # =========================
-import geopandas as gpd
+# =========================
+# ADD ZONE LABELS (NO GEOPANDAS)
+# =========================
 
-zones_gdf = gpd.GeoDataFrame.from_features(zones_gdf.__geo_interface__["features"])
+import numpy as np
 
-zones_gdf.set_crs(epsg=4326, inplace=True)
+lons = []
+lats = []
+labels = []
 
+for feature in zones_geojson["features"]:
+    coords = feature["geometry"]["coordinates"]
 
-# Get centroids for labels
-zones_gdf = zones_gdf.to_crs(epsg=3857)
-zones_gdf["centroid"] = zones_gdf.geometry.centroid
-zones_gdf = zones_gdf.to_crs(epsg=4326)
+    # Handle Polygon vs MultiPolygon
+    if feature["geometry"]["type"] == "Polygon":
+        polygon = coords[0]
+    else:  # MultiPolygon
+        polygon = coords[0][0]
 
-zones_gdf["lon"] = zones_gdf.centroid.x
-zones_gdf["lat"] = zones_gdf.centroid.y
+    xs = [point[0] for point in polygon]
+    ys = [point[1] for point in polygon]
 
-# Add labels (zone_id)
+    # Simple centroid (average)
+    lons.append(np.mean(xs))
+    lats.append(np.mean(ys))
+
+    # Use zone_id or fallback
+    props = feature["properties"]
+    labels.append(props.get("zone_id", props.get("zone_name", "")))
+
+# Add labels to map
 fig_map.add_scattergeo(
-    lon=zones_gdf["lon"],
-    lat=zones_gdf["lat"],
-    text=zones_gdf["zone_id"],  # 👈 IMPORTANT FIELD
+    lon=lons,
+    lat=lats,
+    text=labels,
     mode="text",
     showlegend=False
 )
-
-fig_map.update_layout(
-    title="Incident Distribution by Zone",
-    title_x=0.02
-)
-
-st.plotly_chart(fig_map, use_container_width=True)
 
 
 # =========================
